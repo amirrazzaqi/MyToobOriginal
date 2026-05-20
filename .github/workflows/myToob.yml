@@ -176,6 +176,17 @@ jobs:
             "480")
               FORMAT="bestvideo[height=480]+bestaudio/bestvideo[height<=480]+bestaudio/bestvideo[height=480]*+bestaudio*/bestvideo[height<=480]*+bestaudio*"
               ;;
+              FORMAT="bestvideo[height=480]+bestaudio/bestvideo[height<=480]+bestaudio/bestvideo[height=480]*+bestaudio*/bestvideo[height<=480]*+bestaudio*"
+              ;;
+            "360")
+              FORMAT="bestvideo[height=360]+bestaudio/bestvideo[height<=360]+bestaudio/bestvideo[height=360]*+bestaudio*/bestvideo[height<=360]*+bestaudio*"
+              ;;
+            "240")
+              FORMAT="bestvideo[height=240]+bestaudio/bestvideo[height<=240]+bestaudio/bestvideo[height=240]*+bestaudio*/bestvideo[height<=240]*+bestaudio*"
+              ;;
+            "144")
+              FORMAT="bestvideo[height=144]+bestaudio/bestvideo[height<=144]+bestaudio/bestvideo[height=144]*+bestaudio*/bestvideo[height<=144]*+bestaudio*"
+              ;;
             *)
               FORMAT="bestvideo+bestaudio/bestvideo*+bestaudio*/best"
               ;;
