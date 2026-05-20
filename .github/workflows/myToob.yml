@@ -123,7 +123,7 @@ jobs:
 
           # REDUCED from 90MB to 45MB - under GitHub's 50MB recommendation
           # Temporary I changed back to 90MB
-          SPLIT_MB=90
+          SPLIT_MB=45
           SPLIT_BYTES=$(( SPLIT_MB * 1024 * 1024 ))
 
           # Create safe backup location for our files
