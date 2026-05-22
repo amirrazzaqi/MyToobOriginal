@@ -34,14 +34,12 @@ jobs:
           git config --global core.compression 0
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          echo "Git configured successfully"
 
       - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg zip p7zip-full curl jq bc
           pip3 install --upgrade yt-dlp
-          echo "Dependencies installed"
 
       - name: Download Videos from XHAccess
         run: |
@@ -63,6 +61,7 @@ jobs:
             TMP_DIR="tmp_download_$(date +%s)"
             mkdir -p "$TMP_DIR"
 
+            # انتخاب فرمت
             if [ "$QUALITY" = "720" ]; then
               FORMAT="bestvideo[height<=720]+bestaudio/bestvideo[height<=720]+bestaudio/best"
             elif [ "$QUALITY" = "1080" ]; then
@@ -71,6 +70,8 @@ jobs:
               FORMAT="0/best"
             fi
 
+            echo "🔧 استفاده از extractor xhamster..."
+
             yt-dlp \
               -o "$TMP_DIR/%(title)s.%(ext)s" \
               --no-playlist \
@@ -78,13 +79,14 @@ jobs:
               --format-sort "res:720,codec:h264:vp9,filesize" \
               --prefer-free-formats \
               --merge-output-format mp4 \
-              --retries 20 \
-              --fragment-retries 15 \
-              --concurrent-fragments 4 \
+              --retries 25 \
+              --fragment-retries 20 \
+              --concurrent-fragments 6 \
               --http-chunk-size 10M \
               --no-check-certificate \
               --referer "https://xhaccess.com/" \
               --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36" \
+              --extractor-args "xhamster:skip_download_error" \
               --restrict-filenames \
               "$URL"
 
@@ -102,16 +104,24 @@ jobs:
                 fi
               done
             else
-              echo "❌ دانلود ناموفق"
+              echo "❌ دانلود ناموفق - تلاش دوم با generic"
+              yt-dlp \
+                -o "$TMP_DIR/%(title)s.%(ext)s" \
+                --no-playlist \
+                --format "$FORMAT" \
+                --merge-output-format mp4 \
+                --no-check-certificate \
+                --referer "https://xhaccess.com/" \
+                "$URL"
             fi
 
             rm -rf "$TMP_DIR"
             sleep 8
           done
 
-      - name: Commit & Push to Repository
+      - name: Commit & Push
         run: |
-          echo "🔄 کپی فایل‌ها به پوشه videos..."
+          echo "🔄 کپی فایل‌ها..."
           cp -r "$BACKUP_DIR"/* videos/ 2>/dev/null || true
 
           echo "📊 چک کردن تغییرات..."
@@ -120,19 +130,19 @@ jobs:
           if git diff --cached --quiet; then
             echo "✅ هیچ تغییری وجود ندارد."
           else
-            echo "📝 Commit در حال انجام..."
+            echo "📝 Commit کردن..."
             git commit -m "📥 XHAccess Download - $(date +'%Y-%m-%d %H:%M:%S')" || true
             
-            echo "🚀 Push در حال انجام..."
-            for i in {1..5}; do
-              echo "تلاش $i از 5 برای Push..."
-              if timeout 90 git push --force-with-lease origin HEAD:main 2>&1; then
-                echo "✅ Push با موفقیت انجام شد!"
+            echo "🚀 Push کردن..."
+            for i in {1..6}; do
+              echo "تلاش $i از 6..."
+              if timeout 120 git push origin HEAD:main 2>&1; then
+                echo "✅ Push موفق!"
                 break
               else
-                echo "⚠️ Push ناموفق - تلاش بعدی..."
-                sleep 8
-                git fetch origin main
+                echo "⚠️ Push ناموفق، تلاش بعدی..."
+                sleep 10
+                git fetch origin main --quiet
                 git rebase origin/main || true
               fi
             done
