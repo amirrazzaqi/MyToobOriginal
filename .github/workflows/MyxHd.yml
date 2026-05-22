@@ -61,7 +61,6 @@ jobs:
             TMP_DIR="tmp_download_$(date +%s)"
             mkdir -p "$TMP_DIR"
 
-            # انتخاب فرمت
             if [ "$QUALITY" = "720" ]; then
               FORMAT="bestvideo[height<=720]+bestaudio/bestvideo[height<=720]+bestaudio/best"
             elif [ "$QUALITY" = "1080" ]; then
@@ -70,23 +69,21 @@ jobs:
               FORMAT="0/best"
             fi
 
-            echo "🔧 استفاده از extractor xhamster..."
-
             yt-dlp \
               -o "$TMP_DIR/%(title)s.%(ext)s" \
               --no-playlist \
+              --no-warnings \
               --format "$FORMAT" \
               --format-sort "res:720,codec:h264:vp9,filesize" \
               --prefer-free-formats \
               --merge-output-format mp4 \
-              --retries 25 \
-              --fragment-retries 20 \
-              --concurrent-fragments 6 \
+              --retries 20 \
+              --fragment-retries 15 \
+              --concurrent-fragments 4 \
               --http-chunk-size 10M \
               --no-check-certificate \
               --referer "https://xhaccess.com/" \
               --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36" \
-              --extractor-args "xhamster:skip_download_error" \
               --restrict-filenames \
               "$URL"
 
@@ -104,46 +101,44 @@ jobs:
                 fi
               done
             else
-              echo "❌ دانلود ناموفق - تلاش دوم با generic"
-              yt-dlp \
-                -o "$TMP_DIR/%(title)s.%(ext)s" \
-                --no-playlist \
-                --format "$FORMAT" \
-                --merge-output-format mp4 \
-                --no-check-certificate \
-                --referer "https://xhaccess.com/" \
-                "$URL"
+              echo "❌ دانلود ناموفق برای این لینک"
             fi
 
             rm -rf "$TMP_DIR"
-            sleep 8
+            sleep 7
           done
 
-      - name: Commit & Push
+          echo "🎉 تمام دانلودها تمام شد."
+
+      # ==================== بخش جدید و قوی‌تر Commit & Push ====================
+      - name: Commit & Push to Repository
         run: |
-          echo "🔄 کپی فایل‌ها..."
+          echo "🔄 کپی فایل‌ها از backup به پوشه videos..."
           cp -r "$BACKUP_DIR"/* videos/ 2>/dev/null || true
 
-          echo "📊 چک کردن تغییرات..."
+          echo "📊 اضافه کردن تغییرات..."
           git add videos/
 
           if git diff --cached --quiet; then
-            echo "✅ هیچ تغییری وجود ندارد."
+            echo "✅ هیچ فایل جدیدی برای آپلود وجود ندارد."
           else
-            echo "📝 Commit کردن..."
+            echo "📝 Commit کردن تغییرات..."
             git commit -m "📥 XHAccess Download - $(date +'%Y-%m-%d %H:%M:%S')" || true
+
+            echo "🚀 شروع Push..."
             
-            echo "🚀 Push کردن..."
-            for i in {1..6}; do
-              echo "تلاش $i از 6..."
-              if timeout 120 git push origin HEAD:main 2>&1; then
-                echo "✅ Push موفق!"
+            for i in {1..8}; do
+              echo "🔁 تلاش $i از 8 برای Push..."
+              if timeout 90 git push origin HEAD:main 2>&1; then
+                echo "✅ Push با موفقیت انجام شد!"
                 break
               else
-                echo "⚠️ Push ناموفق، تلاش بعدی..."
-                sleep 10
-                git fetch origin main --quiet
+                echo "⚠️ Push ناموفق - تلاش بعدی..."
+                sleep 12
+                git fetch origin main --quiet || true
                 git rebase origin/main || true
               fi
             done
+
+            echo "✅ مرحله Push تمام شد."
           fi
