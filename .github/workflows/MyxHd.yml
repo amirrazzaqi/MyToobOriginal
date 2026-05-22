@@ -34,12 +34,14 @@ jobs:
           git config --global core.compression 0
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
+          echo "Git configured successfully"
 
       - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg zip p7zip-full curl jq bc
           pip3 install --upgrade yt-dlp
+          echo "Dependencies installed"
 
       - name: Download Videos from XHAccess
         run: |
@@ -61,7 +63,6 @@ jobs:
             TMP_DIR="tmp_download_$(date +%s)"
             mkdir -p "$TMP_DIR"
 
-            # انتخاب فرمت بر اساس کیفیت
             if [ "$QUALITY" = "720" ]; then
               FORMAT="bestvideo[height<=720]+bestaudio/bestvideo[height<=720]+bestaudio/best"
             elif [ "$QUALITY" = "1080" ]; then
@@ -73,7 +74,6 @@ jobs:
             yt-dlp \
               -o "$TMP_DIR/%(title)s.%(ext)s" \
               --no-playlist \
-              --no-warnings \
               --format "$FORMAT" \
               --format-sort "res:720,codec:h264:vp9,filesize" \
               --prefer-free-formats \
@@ -90,7 +90,6 @@ jobs:
 
             if [ $? -eq 0 ]; then
               echo "✅ دانلود موفق"
-
               for file in "$TMP_DIR"/*; do
                 if [ -f "$file" ]; then
                   BASENAME=$(basename "$file")
@@ -103,24 +102,38 @@ jobs:
                 fi
               done
             else
-              echo "❌ دانلود ناموفق برای این لینک"
+              echo "❌ دانلود ناموفق"
             fi
 
             rm -rf "$TMP_DIR"
-            sleep 7
+            sleep 8
           done
 
-          echo "🎉 تمام دانلودها تمام شد."
-
-      - name: Commit & Push
+      - name: Commit & Push to Repository
         run: |
+          echo "🔄 کپی فایل‌ها به پوشه videos..."
           cp -r "$BACKUP_DIR"/* videos/ 2>/dev/null || true
-          
+
+          echo "📊 چک کردن تغییرات..."
           git add videos/
-          
-          if ! git diff --cached --quiet; then
-            git commit -m "📥 XHAccess Download - $(date +'%Y-%m-%d %H:%M:%S')" || true
-            git push
+
+          if git diff --cached --quiet; then
+            echo "✅ هیچ تغییری وجود ندارد."
           else
-            echo "هیچ فایل جدیدی برای commit وجود ندارد."
+            echo "📝 Commit در حال انجام..."
+            git commit -m "📥 XHAccess Download - $(date +'%Y-%m-%d %H:%M:%S')" || true
+            
+            echo "🚀 Push در حال انجام..."
+            for i in {1..5}; do
+              echo "تلاش $i از 5 برای Push..."
+              if timeout 90 git push --force-with-lease origin HEAD:main 2>&1; then
+                echo "✅ Push با موفقیت انجام شد!"
+                break
+              else
+                echo "⚠️ Push ناموفق - تلاش بعدی..."
+                sleep 8
+                git fetch origin main
+                git rebase origin/main || true
+              fi
+            done
           fi
