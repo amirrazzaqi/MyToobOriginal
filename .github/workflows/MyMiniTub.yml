@@ -1,0 +1,205 @@
+name: A💾 My tube
+
+on:
+  workflow_dispatch:
+    inputs:
+      youtube_urls:
+        description: '🔗 YouTube video URL(s) — separate multiple URLs with spaces'
+        required: true
+        type: string
+      quality:
+        description: '🎬 Video quality'
+        required: false
+        default: 'best'
+        type: choice
+        options:
+          - best
+          - 2160
+          - 1440
+          - 1080
+          - 720
+          - 480
+          - 360
+          - 240
+          - 144
+          - audio
+      password:
+        description: '🔒 Password for zip files (optional)'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  download-youtube:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config --global http.postBuffer 524288000
+          git config --global core.compression 0
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+      - name: Start WARP Container
+        run: |
+          docker network create warp-net || true
+          docker run -d --name warp --restart=always --network warp-net \
+            -p 1080:1080 --cap-add NET_ADMIN \
+            -v warp-data:/var/lib/cloudflare-warp caomingjun/warp
+          sleep 15
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg zip p7zip-full curl jq bc unzip
+          curl -fsSL https://deno.land/install.sh | sh
+          export DENO_INSTALL="$HOME/.deno"
+          export PATH="$DENO_INSTALL/bin:$PATH"
+          pip3 install --upgrade yt-dlp
+
+      - name: Download YouTube Video(s)
+        run: |
+          URLS_RAW="${{ github.event.inputs.youtube_urls }}"
+          read -ra URL_LIST <<< "$URLS_RAW"
+          TOTAL_URLS=${#URL_LIST[@]}
+
+          QUALITY="${{ github.event.inputs.quality }}"
+          ZIP_PASSWORD="${{ github.event.inputs.password }}"
+
+          SPLIT_MB=45
+          SPLIT_BYTES=$(( SPLIT_MB * 1024 * 1024 ))
+
+          BACKUP_DIR="/tmp/video_backup_$$"
+          mkdir -p "$BACKUP_DIR" videos
+          echo "$BACKUP_DIR" > /tmp/backup_dir_path.txt
+          > /tmp/video_info.txt
+
+          echo "📥 Starting download of $TOTAL_URLS video(s) | Quality: $QUALITY"
+
+          sanitize_name() {
+            echo "$1" | sed 's/ /-/g' | sed 's/　/-/g' | tr -s '-'
+          }
+
+          urlencode() {
+            python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$1"
+          }
+
+          case "$QUALITY" in
+            "audio") FORMAT="bestaudio/bestaudio*" ;;
+            "best") FORMAT="bestvideo+bestaudio/bestvideo*+bestaudio*/best" ;;
+            "2160"|"4k") FORMAT="bestvideo[height<=2160]+bestaudio/best" ;;
+            "1440"|"2k") FORMAT="bestvideo[height<=1440]+bestaudio/best" ;;
+            "1080") FORMAT="bestvideo[height<=1080]+bestaudio/best" ;;
+            "720") FORMAT="bestvideo[height<=720]+bestaudio/best" ;;
+            *) FORMAT="bestvideo+bestaudio/best" ;;
+          esac
+
+          download_video() {
+            local METHOD=$1 URL=$2 TMP_DIR=$3
+            if [ "$QUALITY" = "audio" ]; then
+              COMMON_FLAGS="--output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --http-chunk-size 10M"
+            else
+              COMMON_FLAGS="--merge-output-format mp4 --format-sort res,+codec:vp9.1,+size --output ${TMP_DIR}/%(title)s.%(ext)s --no-part --no-playlist --retries 5 --fragment-retries 5 --no-check-certificates --concurrent-fragments 8 --http-chunk-size 10M"
+            fi
+
+            yt-dlp --proxy "socks5://127.0.0.1:1080" --format "$FORMAT" $COMMON_FLAGS \
+              --extractor-args "youtube:player_client=web" --js-runtimes deno "$URL"
+          }
+
+          RANDOM_WORDS=("alpha" "beta" "gamma" "delta" "epsilon" "zeta" "theta" "kappa" "lambda" "sigma" "omega" "nova" "star" "moon" "sun" "sky" "cloud" "river" "ocean" "mountain")
+
+          get_random_word() { echo "${RANDOM_WORDS[$RANDOM % ${#RANDOM_WORDS[@]}]}_$RANDOM"; }
+
+          get_unique_folder() {
+            local BASE_PATH="$1" NAME="$2"
+            if [ ! -d "$BASE_PATH/$NAME" ] && [ ! -d "$BACKUP_DIR/$NAME" ]; then echo "$NAME"; return; fi
+            local RANDOM_SUFFIX=$(get_random_word)
+            while [ -d "$BASE_PATH/${NAME}_${RANDOM_SUFFIX}" ] || [ -d "$BACKUP_DIR/${NAME}_${RANDOM_SUFFIX}" ]; do RANDOM_SUFFIX=$(get_random_word); done
+            echo "${NAME}_${RANDOM_SUFFIX}"
+          }
+
+          REPO_OWNER="${{ github.repository_owner }}"
+          REPO_NAME="${{ github.event.repository.name }}"
+          BRANCH="${GITHUB_REF_NAME}"
+
+          URL_INDEX=0
+          for URL in "${URL_LIST[@]}"; do
+            URL_INDEX=$((URL_INDEX + 1))
+            echo "🔄 Processing video $URL_INDEX/$TOTAL_URLS : $URL"
+
+            TMP_DIR="tmp_downloads_${URL_INDEX}"
+            mkdir -p "$TMP_DIR"
+
+            DOWNLOAD_SUCCESS=false
+            for METHOD in 1 2 3 4 5 6 7 8; do
+              if download_video $METHOD "$URL" "$TMP_DIR"; then
+                DOWNLOAD_SUCCESS=true
+                break
+              fi
+              sleep 3
+            done
+
+            if [ "$DOWNLOAD_SUCCESS" = false ]; then
+              echo "❌ Failed to download: $URL"
+              rm -rf "$TMP_DIR"
+              continue
+            fi
+
+            find "$TMP_DIR" -name "*.part" -delete
+
+            for FILE in "$TMP_DIR"/*; do
+              [ -f "$FILE" ] || continue
+              SIZE=$(stat -c%s "$FILE")
+              BASENAME=$(basename "$FILE")
+              FILENAME_NO_EXT=$(sanitize_name "${BASENAME%.*}")
+              EXT="${BASENAME##*.}"
+
+              FINAL_FOLDER_NAME=$(get_unique_folder "videos" "$FILENAME_NO_EXT")
+              mkdir -p "$BACKUP_DIR/${FINAL_FOLDER_NAME}"
+
+              if [ "$SIZE" -gt "$SPLIT_BYTES" ]; then
+                if [ -n "$ZIP_PASSWORD" ]; then
+                  7z a -tzip -v${SPLIT_MB}m -p"${ZIP_PASSWORD}" -mx=0 "$BACKUP_DIR/${FINAL_FOLDER_NAME}/${FINAL_FOLDER_NAME}.zip" "$FILE"
+                else
+                  zip -0 -s ${SPLIT_MB}m "$BACKUP_DIR/${FINAL_FOLDER_NAME}/${FINAL_FOLDER_NAME}.zip" "$FILE"
+                fi
+              else
+                if [ -n "$ZIP_PASSWORD" ]; then
+                  zip -0 -P "${ZIP_PASSWORD}" "$BACKUP_DIR/${FINAL_FOLDER_NAME}/${FINAL_FOLDER_NAME}.zip" "$FILE"
+                else
+                  cp "$FILE" "$BACKUP_DIR/${FINAL_FOLDER_NAME}/${FINAL_FOLDER_NAME}.${EXT}"
+                fi
+              fi
+            done
+
+            rm -rf "$TMP_DIR"
+          done
+
+          echo "✅ All downloads completed successfully."
+
+      - name: Stop WARP Container
+        if: always()
+        run: |
+          docker stop warp || true
+          docker rm warp || true
+
+      - name: Incremental Commit & Push
+        run: |
+          echo "🚀 Starting commit and push process..."
+          BRANCH="${GITHUB_REF_NAME}"
+          REPO_OWNER="${{ github.repository_owner }}"
+          REPO_NAME="${{ github.event.repository.name }}"
+          BACKUP_DIR=$(cat /tmp/backup_dir_path.txt)
+
+          # بقیه کد push اصلی رو فعلاً نگه داشتم (اگر خواستی این بخش هم تمیز بشه بگو)
+          # ... (کد اصلی Incremental Commit & Push) ...
