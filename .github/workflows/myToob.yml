@@ -11,7 +11,7 @@ on:
       quality:
         description: '🎬 Video quality'
         required: false
-        default: 'best'
+        default: '720'
         type: choice
         options:
           - best
