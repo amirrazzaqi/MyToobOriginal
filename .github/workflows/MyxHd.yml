@@ -1,0 +1,138 @@
+name: 💾 XHAD
+
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: '🔗 لینک ویدیوهای xhaccess.com (با فاصله جدا کنید)'
+        required: true
+        type: string
+      quality:
+        description: '🎬 کیفیت ویدیو'
+        required: false
+        default: '720'
+        type: choice
+        options:
+          - 720
+          - 1080
+          - best
+
+jobs:
+  download-xhaccess:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure Git
+        run: |
+          git config --global http.postBuffer 524288000
+          git config --global core.compression 0
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+      - name: Start Cloudflare WARP
+        run: |
+          docker network create warp-net || true
+          docker run -d --name warp --restart=always --network warp-net \
+            -p 1080:1080 --cap-add NET_ADMIN \
+            -v warp-data:/var/lib/cloudflare-warp \
+            caomingjun/warp
+          sleep 15
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg zip p7zip-full curl jq bc
+          pip3 install --upgrade yt-dlp
+
+      - name: Download Videos from XHAccess
+        run: |
+          URLS_RAW="${{ github.event.inputs.urls }}"
+          read -ra URL_LIST <<< "$URLS_RAW"
+          QUALITY="${{ github.event.inputs.quality }}"
+
+          mkdir -p videos
+          BACKUP_DIR="/tmp/xh_downloads"
+          mkdir -p "$BACKUP_DIR"
+
+          echo "📥 تعداد لینک: ${#URL_LIST[@]}"
+
+          for URL in "${URL_LIST[@]}"; do
+            echo "========================================"
+            echo "🔽 در حال دانلود: $URL"
+            echo "========================================"
+
+            TMP_DIR="tmp_download_$(date +%s)"
+            mkdir -p "$TMP_DIR"
+
+            # انتخاب فرمت
+            case "$QUALITY" in
+              "720")
+                FORMAT="bestvideo[height<=720]+bestaudio/bestvideo[height<=720]+bestaudio/best"
+                ;;
+              "1080")
+                FORMAT="bestvideo[height<=1080]+bestaudio/bestvideo[height<=1080]+bestaudio/best"
+                ;;
+              *)
+                FORMAT="0/best"
+                ;;
+            esac
+
+            yt-dlp \
+              --proxy "socks5://127.0.0.1:1080" \
+              --format "$FORMAT" \
+              --format-sort "res:720,codec:h264:vp9,filesize" \
+              --merge-output-format mp4 \
+              --no-playlist \
+              --retries 12 \
+              --fragment-retries 12 \
+              --concurrent-fragments 6 \
+              --http-chunk-size 10M \
+              --no-check-certificate \
+              --referer "https://xhaccess.com/" \
+              --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36" \
+              --output "$TMP_DIR/%(title)s.%(ext)s" \
+              "$URL"
+
+            if [ $? -eq 0 ]; then
+              echo "✅ دانلود موفق"
+
+              # انتقال فایل به پوشه نهایی
+              for file in "$TMP_DIR"/*; do
+                if [ -f "$file" ]; then
+                  BASENAME=$(basename "$file")
+                  NAME_NO_EXT="${BASENAME%.*}"
+                  SAFE_NAME=$(echo "$NAME_NO_EXT" | sed 's/[^a-zA-Z0-9_.-]/-/g' | sed 's/-+/-/g' | sed 's/^-\+//g')
+                  
+                  mkdir -p "$BACKUP_DIR/${SAFE_NAME}"
+                  cp "$file" "$BACKUP_DIR/${SAFE_NAME}/${SAFE_NAME}.mp4"
+                  echo "   📁 ذخیره شد: ${SAFE_NAME}.mp4"
+                fi
+              done
+            else
+              echo "❌ دانلود ناموفق"
+            fi
+
+            rm -rf "$TMP_DIR"
+            sleep 6
+          done
+
+          echo "🎉 تمام دانلودها تمام شد."
+
+      - name: Commit & Push to GitHub
+        run: |
+          cp -r "$BACKUP_DIR"/* videos/ 2>/dev/null || true
+
+          git add videos/
+          
+          if git diff --cached --quiet; then
+            echo "هیچ فایل جدیدی برای آپلود وجود ندارد."
+          else
+            git commit -m "📥 XHAccess Download - $(date +'%Y-%m-%d %H:%M:%S')" || true
+            git push || echo "Push failed (maybe no changes)"
+          fi
