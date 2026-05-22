@@ -112,5 +112,3 @@ jobs:
 
           echo "🎉 تمام دانلودها تمام شد."
 
-      - name: Commit & Push
-            echo "داشاخ"
