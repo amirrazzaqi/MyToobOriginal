@@ -61,6 +61,7 @@ jobs:
             TMP_DIR="tmp_download_$(date +%s)"
             mkdir -p "$TMP_DIR"
 
+            # انتخاب فرمت بر اساس کیفیت
             if [ "$QUALITY" = "720" ]; then
               FORMAT="bestvideo[height<=720]+bestaudio/bestvideo[height<=720]+bestaudio/best"
             elif [ "$QUALITY" = "1080" ]; then
@@ -89,6 +90,7 @@ jobs:
 
             if [ $? -eq 0 ]; then
               echo "✅ دانلود موفق"
+
               for file in "$TMP_DIR"/*; do
                 if [ -f "$file" ]; then
                   BASENAME=$(basename "$file")
@@ -110,6 +112,18 @@ jobs:
 
           echo "🎉 تمام دانلودها تمام شد."
 
+      - name: Commit & Push
+        run: |
+          cp -r "$BACKUP_DIR"/* videos/ 2>/dev/null || true
+          
+          git add videos/
+          
+          if ! git diff --cached --quiet; then
+            git commit -m "📥 XHAccess Download - $(date +'%Y-%m-%d %H:%M:%S')" || true
+            git push
+          else
+            echo "هیچ فایل جدیدی برای commit وجود ندارد."
+          fi
       # ==================== بخش جدید و قوی‌تر Commit & Push ====================
       - name: Commit & Push to Repository
         run: |
