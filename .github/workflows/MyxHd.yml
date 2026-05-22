@@ -1,4 +1,4 @@
-name: 💾 XHAD
+name: 💾 XHAccess Downloader
 
 on:
   workflow_dispatch:
@@ -35,15 +35,6 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-      - name: Start Cloudflare WARP
-        run: |
-          docker network create warp-net || true
-          docker run -d --name warp --restart=always --network warp-net \
-            -p 1080:1080 --cap-add NET_ADMIN \
-            -v warp-data:/var/lib/cloudflare-warp \
-            caomingjun/warp
-          sleep 15
-
       - name: Install Dependencies
         run: |
           sudo apt-get update
@@ -64,45 +55,42 @@ jobs:
 
           for URL in "${URL_LIST[@]}"; do
             echo "========================================"
-            echo "🔽 در حال دانلود: $URL"
+            echo "🔽 شروع دانلود: $URL"
             echo "========================================"
 
             TMP_DIR="tmp_download_$(date +%s)"
             mkdir -p "$TMP_DIR"
 
-            # انتخاب فرمت
-            case "$QUALITY" in
-              "720")
-                FORMAT="bestvideo[height<=720]+bestaudio/bestvideo[height<=720]+bestaudio/best"
-                ;;
-              "1080")
-                FORMAT="bestvideo[height<=1080]+bestaudio/bestvideo[height<=1080]+bestaudio/best"
-                ;;
-              *)
-                FORMAT="0/best"
-                ;;
-            esac
+            # انتخاب فرمت بر اساس کیفیت
+            if [ "$QUALITY" = "720" ]; then
+              FORMAT="bestvideo[height<=720]+bestaudio/bestvideo[height<=720]+bestaudio/best"
+            elif [ "$QUALITY" = "1080" ]; then
+              FORMAT="bestvideo[height<=1080]+bestaudio/bestvideo[height<=1080]+bestaudio/best"
+            else
+              FORMAT="0/best"
+            fi
 
             yt-dlp \
-              --proxy "socks5://127.0.0.1:1080" \
+              -o "$TMP_DIR/%(title)s.%(ext)s" \
+              --no-playlist \
+              --no-warnings \
               --format "$FORMAT" \
               --format-sort "res:720,codec:h264:vp9,filesize" \
+              --prefer-free-formats \
               --merge-output-format mp4 \
-              --no-playlist \
-              --retries 12 \
-              --fragment-retries 12 \
-              --concurrent-fragments 6 \
+              --retries 20 \
+              --fragment-retries 15 \
+              --concurrent-fragments 4 \
               --http-chunk-size 10M \
               --no-check-certificate \
               --referer "https://xhaccess.com/" \
               --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36" \
-              --output "$TMP_DIR/%(title)s.%(ext)s" \
+              --restrict-filenames \
               "$URL"
 
             if [ $? -eq 0 ]; then
               echo "✅ دانلود موفق"
 
-              # انتقال فایل به پوشه نهایی
               for file in "$TMP_DIR"/*; do
                 if [ -f "$file" ]; then
                   BASENAME=$(basename "$file")
@@ -111,28 +99,28 @@ jobs:
                   
                   mkdir -p "$BACKUP_DIR/${SAFE_NAME}"
                   cp "$file" "$BACKUP_DIR/${SAFE_NAME}/${SAFE_NAME}.mp4"
-                  echo "   📁 ذخیره شد: ${SAFE_NAME}.mp4"
+                  echo "   📁 ذخیره شد → ${SAFE_NAME}.mp4"
                 fi
               done
             else
-              echo "❌ دانلود ناموفق"
+              echo "❌ دانلود ناموفق برای این لینک"
             fi
 
             rm -rf "$TMP_DIR"
-            sleep 6
+            sleep 7
           done
 
           echo "🎉 تمام دانلودها تمام شد."
 
-      - name: Commit & Push to GitHub
+      - name: Commit & Push
         run: |
           cp -r "$BACKUP_DIR"/* videos/ 2>/dev/null || true
-
+          
           git add videos/
           
-          if git diff --cached --quiet; then
-            echo "هیچ فایل جدیدی برای آپلود وجود ندارد."
-          else
+          if ! git diff --cached --quiet; then
             git commit -m "📥 XHAccess Download - $(date +'%Y-%m-%d %H:%M:%S')" || true
-            git push || echo "Push failed (maybe no changes)"
+            git push
+          else
+            echo "هیچ فایل جدیدی برای commit وجود ندارد."
           fi
