@@ -124,35 +124,4 @@ jobs:
           else
             echo "هیچ فایل جدیدی برای commit وجود ندارد."
           fi
-      # ==================== بخش جدید و قوی‌تر Commit & Push ====================
-      - name: Commit & Push to Repository
-        run: |
-          echo "🔄 کپی فایل‌ها از backup به پوشه videos..."
-          cp -r "$BACKUP_DIR"/* videos/ 2>/dev/null || true
 
-          echo "📊 اضافه کردن تغییرات..."
-          git add videos/
-
-          if git diff --cached --quiet; then
-            echo "✅ هیچ فایل جدیدی برای آپلود وجود ندارد."
-          else
-            echo "📝 Commit کردن تغییرات..."
-            git commit -m "📥 XHAccess Download - $(date +'%Y-%m-%d %H:%M:%S')" || true
-
-            echo "🚀 شروع Push..."
-            
-            for i in {1..8}; do
-              echo "🔁 تلاش $i از 8 برای Push..."
-              if timeout 90 git push origin HEAD:main 2>&1; then
-                echo "✅ Push با موفقیت انجام شد!"
-                break
-              else
-                echo "⚠️ Push ناموفق - تلاش بعدی..."
-                sleep 12
-                git fetch origin main --quiet || true
-                git rebase origin/main || true
-              fi
-            done
-
-            echo "✅ مرحله Push تمام شد."
-          fi
